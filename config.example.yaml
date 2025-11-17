@@ -1,6 +1,6 @@
-port: "8080"
+port: "60024"
 debug: false
 translation:
   service_type: "deeplx"
   api_key: "sk-your-key"
-  base_url: "" # 可选：自定义 DeepLX / 代理地址
+  base_url: "https://deeplx.jayogo.com/translate" # 可选：自定义 DeepLX / 代理地址
