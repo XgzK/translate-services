@@ -283,7 +283,7 @@ func (s *Server) configureMiddleware() {
 
 // registerRoutes 注册路由，参数: 无（使用接收者），返回: 无
 func (s *Server) registerRoutes() {
-	//s.echo.GET("/translate_a/element.js", s.elementHandler)
+	s.echo.GET("/translate_a/element.js", s.elementHandler)
 	s.echo.POST("/translate_a/single", s.translateHandler)
 	s.echo.POST("/translate_a/t", s.translateDocumentHandler)
 	s.echo.GET("/healthz", s.healthHandler)

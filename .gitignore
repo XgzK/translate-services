@@ -12,4 +12,5 @@ null
 /.idea
 config.yaml
 *.iml
-.claude
+/.claude
+/.serena
