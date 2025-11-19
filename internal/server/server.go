@@ -182,12 +182,15 @@ func (s *Server) translateHandler(c echo.Context) error {
 	}
 
 	// 请求成功日志（保持在 Info，默认可见）
-	if resp != nil && len(resp.Sentences) > 0 {
+	if len(resp.Sentences) > 0 {
 		s.logger.Info().
 			Str("handler", "translate_single").
 			Str("ip", clientIP).
-			Str("src", resp.Src).
+			Str("requested_sl", sl).
+			Str("requested_tl", tl).
+			Str("detected_src", resp.Src).
 			Str("orig", resp.Sentences[0].Orig).
+			Str("trans", resp.Sentences[0].Trans).
 			Msg("翻译成功")
 	}
 
