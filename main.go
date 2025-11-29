@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"translate-services/internal/config"
-	"translate-services/internal/logging"
-	"translate-services/internal/server"
+	"github.com/XgzK/translate-services/internal/config"
+	"github.com/XgzK/translate-services/internal/logging"
+	"github.com/XgzK/translate-services/internal/server"
 )
 
 // main 是服务的入口函数，参数: 无，返回: 无
@@ -63,7 +63,8 @@ func main() {
 		}
 	case <-ctx.Done():
 		logger.Info().Msg("收到停止信号，准备优雅停机")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		shutdownTimeout := time.Duration(cfg.Server.GetShutdownTimeout()) * time.Second
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Error().Err(err).Msg("优雅停机失败")

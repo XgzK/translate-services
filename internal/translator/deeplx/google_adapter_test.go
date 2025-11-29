@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/XgzK/translate-services/internal/langutil"
 )
 
 // TestNewGoogleTranslator 测试谷歌翻译适配器创建，参数: 测试实例，返回: 无
@@ -132,7 +134,7 @@ func TestGoogleTranslator_Translate(t *testing.T) {
 				if len(resp.Sentences) == 0 {
 					t.Error("Sentences 为空")
 				}
-				if resp.Dict == nil || len(resp.Dict) == 0 {
+				if len(resp.Dict) == 0 {
 					t.Error("Dict 为空")
 				}
 				if resp.Spell == nil {
@@ -192,9 +194,9 @@ func TestNormalizeLanguageCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeLanguageCode(tt.input)
+			got := langutil.NormalizeLanguageCode(tt.input)
 			if got != tt.want {
-				t.Errorf("normalizeLanguageCode() = %v, want %v", got, tt.want)
+				t.Errorf("NormalizeLanguageCode() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -248,9 +250,9 @@ func TestDetectLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := detectLanguage(tt.text, tt.requested)
+			got := langutil.DetectLanguage(tt.text, tt.requested)
 			if got != tt.want {
-				t.Errorf("detectLanguage() = %v, want %v", got, tt.want)
+				t.Errorf("DetectLanguage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -286,9 +288,9 @@ func TestIncludes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := includes(tt.params, tt.target)
+			got := langutil.Includes(tt.params, tt.target)
 			if got != tt.want {
-				t.Errorf("includes() = %v, want %v", got, tt.want)
+				t.Errorf("Includes() = %v, want %v", got, tt.want)
 			}
 		})
 	}

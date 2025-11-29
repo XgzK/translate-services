@@ -68,14 +68,10 @@ func (f *TranslationServiceFactory) CreateService(
 func (f *TranslationServiceFactory) createDeepLXService(
 	config *TranslationServiceConfig,
 ) (TranslationService, error) {
-	service, err := NewGoogleTranslator(config.APIKey)
+	// 使用完整配置创建服务（包含 Timeout、BaseURL 等）
+	service, err := NewGoogleTranslatorWithConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 DeepLX 服务失败: %w", err)
-	}
-
-	// 应用自定义配置
-	if config.BaseURL != "" {
-		service.translator.SetBaseURL(config.BaseURL)
 	}
 
 	return service, nil

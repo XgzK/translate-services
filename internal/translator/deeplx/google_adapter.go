@@ -4,7 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"translate-services/internal/translation"
+	"github.com/XgzK/translate-services/internal/langutil"
+	"github.com/XgzK/translate-services/internal/translation"
 )
 
 // GoogleTranslator 谷歌翻译接口适配器 (适配器模式，让 DeepLX 兼容谷歌格式喵～)
@@ -17,6 +18,19 @@ type GoogleTranslator struct {
 // NewGoogleTranslator 创建谷歌翻译适配器，参数: API 密钥，返回: 适配器指针或错误
 func NewGoogleTranslator(apiKey string) (*GoogleTranslator, error) {
 	translator, err := NewTranslator(apiKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GoogleTranslator{
+		translator: translator,
+		name:       "DeepLX",
+	}, nil
+}
+
+// NewGoogleTranslatorWithConfig 使用配置创建适配器，参数: 配置对象，返回: 适配器指针或错误
+func NewGoogleTranslatorWithConfig(config *TranslationServiceConfig) (*GoogleTranslator, error) {
+	translator, err := NewTranslatorWithConfig(config)
 	if err != nil {
 		return nil, err
 	}
@@ -40,24 +54,39 @@ func NewGoogleTranslatorWithClient(apiKey string, client interface{}) (*GoogleTr
 	}, nil
 }
 
-// Translate 执行翻译并返回谷歌格式，参数: 上下文、文本、源语言、目标语言、数据类型，返回: 翻译响应或错误
-func (g *GoogleTranslator) Translate(ctx context.Context, q, sl, tl string, dt []string) (*translation.Response, error) {
-	// 执行 DeepLX 翻译
+// translateFunc 翻译函数类型定义，用于抽象不同翻译方法
+type translateFunc func(ctx context.Context, text, targetLang string, sourceLang ...string) *TranslationResult
+
+// doTranslate 执行翻译的公共逻辑 (DRY 原则：抽取重复代码喵～)
+// 参数: 上下文、文本、源语言、目标语言、数据类型、翻译函数，返回: 翻译响应或错误
+func (g *GoogleTranslator) doTranslate(ctx context.Context, q, sl, tl string, dt []string, fn translateFunc) (*translation.Response, error) {
 	var result *TranslationResult
 	if sl != "" && !strings.EqualFold(sl, "auto") {
-		result = g.translator.TranslateWithContext(ctx, q, tl, sl)
+		result = fn(ctx, q, tl, sl)
 	} else {
-		result = g.translator.TranslateWithContext(ctx, q, tl)
+		result = fn(ctx, q, tl)
 	}
 
-	// 检查是否成功
 	if !result.Success {
 		// 即使失败也返回一个基本的响应结构，避免调用方报错
 		return g.buildErrorResponse(q, sl, tl), nil
 	}
 
-	// 转换为谷歌格式 (DRY 原则：统一转换逻辑喵)
 	return g.convertToGoogleFormat(q, result, dt), nil
+}
+
+// Translate 执行翻译并返回谷歌格式，参数: 上下文、文本、源语言、目标语言、数据类型，返回: 翻译响应或错误
+func (g *GoogleTranslator) Translate(ctx context.Context, q, sl, tl string, dt []string) (*translation.Response, error) {
+	return g.doTranslate(ctx, q, sl, tl, dt, g.translator.TranslateWithContext)
+}
+
+// TranslateWithModel 使用指定模型执行翻译并返回谷歌格式，参数: 上下文、文本、源语言、目标语言、数据类型、模型名称，返回: 翻译响应或错误
+func (g *GoogleTranslator) TranslateWithModel(ctx context.Context, q, sl, tl string, dt []string, model string) (*translation.Response, error) {
+	// 使用闭包捕获 model 参数，适配统一的 translateFunc 签名
+	fn := func(ctx context.Context, text, targetLang string, sourceLang ...string) *TranslationResult {
+		return g.translator.TranslateWithModelContext(ctx, text, targetLang, model, sourceLang...)
+	}
+	return g.doTranslate(ctx, q, sl, tl, dt, fn)
 }
 
 // convertToGoogleFormat 将结果转换为谷歌格式，参数: 原文本、翻译结果、数据类型，返回: 翻译响应
@@ -67,11 +96,11 @@ func (g *GoogleTranslator) convertToGoogleFormat(
 	dt []string,
 ) *translation.Response {
 	// 规范化检测到的源语言
-	detectedLang := normalizeLanguageCode(result.SourceLang)
+	detectedLang := langutil.NormalizeLanguageCode(result.SourceLang)
 
 	// 如果源语言为空，使用语言检测作为后备 (健壮性处理喵～)
 	if detectedLang == "" {
-		detectedLang = detectLanguage(originalText, "")
+		detectedLang = langutil.DetectLanguage(originalText, "")
 	}
 
 	resp := &translation.Response{
@@ -83,7 +112,7 @@ func (g *GoogleTranslator) convertToGoogleFormat(
 	}
 
 	// 根据请求的数据类型填充响应 (接口隔离原则：按需提供喵)
-	if includes(dt, "t") {
+	if langutil.Includes(dt, "t") {
 		// 基本翻译
 		resp.Sentences = append(resp.Sentences, translation.Sentence{
 			Orig:    originalText,
@@ -92,7 +121,7 @@ func (g *GoogleTranslator) convertToGoogleFormat(
 		})
 	}
 
-	if includes(dt, "rm") {
+	if langutil.Includes(dt, "rm") {
 		// 音译信息：DeepLX 无原生数据，提供简单衍生 (保持兼容喵～)
 		resp.Sentences = append(resp.Sentences, translation.Sentence{
 			SrcTranslit: originalText,
@@ -100,7 +129,7 @@ func (g *GoogleTranslator) convertToGoogleFormat(
 		})
 	}
 
-	if includes(dt, "bd") {
+	if langutil.Includes(dt, "bd") {
 		// 词典和替代翻译（DeepLX 不提供详细词典，使用简化版本）
 		resp.Dict = []translation.Dictionary{
 			{
@@ -116,14 +145,14 @@ func (g *GoogleTranslator) convertToGoogleFormat(
 		}
 	}
 
-	if includes(dt, "qca") {
+	if langutil.Includes(dt, "qca") {
 		// 拼写检查（DeepLX 不提供，返回原文）
 		resp.Spell = &translation.SpellCheck{
 			SpellRes: originalText,
 		}
 	}
 
-	if includes(dt, "ex") {
+	if langutil.Includes(dt, "ex") {
 		// 示例（DeepLX 不提供，返回空）
 		resp.Examples = &translation.Examples{
 			Examples: []translation.Example{},
@@ -137,7 +166,7 @@ func (g *GoogleTranslator) convertToGoogleFormat(
 func (g *GoogleTranslator) buildErrorResponse(q, sl, tl string) *translation.Response {
 	detectedLang := sl
 	if detectedLang == "" || strings.EqualFold(detectedLang, "auto") {
-		detectedLang = detectLanguage(q, sl)
+		detectedLang = langutil.DetectLanguage(q, sl)
 	}
 
 	return &translation.Response{
@@ -153,101 +182,6 @@ func (g *GoogleTranslator) buildErrorResponse(q, sl, tl string) *translation.Res
 			SrclangsConfidences: []float64{0.5},
 		},
 	}
-}
-
-// normalizeLanguageCode 规范化语言代码，参数: 原始代码字符串，返回: 标准化语言代码
-func normalizeLanguageCode(code string) string {
-	code = strings.ToLower(code)
-
-	// DeepLX 返回的语言代码转换为谷歌格式
-	switch code {
-	case "zh", "zh-hans":
-		return "zh-CN"
-	case "zh-hant":
-		return "zh-TW"
-	case "en", "en-us":
-		return "en"
-	case "en-gb":
-		return "en-GB"
-	case "ja":
-		return "ja"
-	case "ko":
-		return "ko"
-	case "fr":
-		return "fr"
-	case "de":
-		return "de"
-	case "es":
-		return "es"
-	case "ru":
-		return "ru"
-	case "pt", "pt-br":
-		return "pt"
-	case "it":
-		return "it"
-	case "ar":
-		return "ar"
-	default:
-		return code
-	}
-}
-
-// detectLanguage 简单语言检测，参数: 文本与请求语言，返回: 推断语言代码
-func detectLanguage(text, requested string) string {
-	if strings.TrimSpace(requested) != "" && !strings.EqualFold(requested, "auto") {
-		return normalizeLanguageCode(requested)
-	}
-
-	// 简单的启发式检测
-	for _, r := range text {
-		if isCJK(r) {
-			return "zh-CN"
-		}
-		if isCyrillic(r) {
-			return "ru"
-		}
-		if isJapanese(r) {
-			return "ja"
-		}
-		if isKorean(r) {
-			return "ko"
-		}
-	}
-
-	return "en"
-}
-
-// includes 检查切片是否包含目标，参数: 字符串切片与目标，返回: 是否包含
-func includes(params []string, target string) bool {
-	for _, v := range params {
-		if v == target {
-			return true
-		}
-	}
-	return false
-}
-
-// isCJK 判断字符是否为中日韩文字，参数: rune，返回: 布尔
-func isCJK(r rune) bool {
-	return (r >= 0x4E00 && r <= 0x9FFF) ||
-		(r >= 0x3400 && r <= 0x4DBF) ||
-		(r >= 0x20000 && r <= 0x2A6DF)
-}
-
-// isCyrillic 判断字符是否为西里尔字母，参数: rune，返回: 布尔
-func isCyrillic(r rune) bool {
-	return r >= 0x0400 && r <= 0x04FF
-}
-
-// isJapanese 判断字符是否为日语假名，参数: rune，返回: 布尔
-func isJapanese(r rune) bool {
-	return (r >= 0x3040 && r <= 0x309F) || // 平假名
-		(r >= 0x30A0 && r <= 0x30FF) // 片假名
-}
-
-// isKorean 判断字符是否为韩文，参数: rune，返回: 布尔
-func isKorean(r rune) bool {
-	return r >= 0xAC00 && r <= 0xD7AF
 }
 
 // ========== TranslationService 接口实现 ==========

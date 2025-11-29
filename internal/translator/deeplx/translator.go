@@ -55,6 +55,28 @@ type DeepLXTranslator struct {
 	maxRetryAttempt int
 }
 
+// 默认配置常量
+const (
+	defaultBaseURL         = "https://deeplx.jayogo.com/translate"
+	defaultClientTimeout   = 30 * time.Second
+	defaultRequestTimeout  = 10 * time.Second
+	defaultMaxRetryAttempt = 2
+)
+
+// defaultHTTPClient 创建带连接池优化的默认 HTTP 客户端
+func defaultHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,              // 最大空闲连接数
+			MaxIdleConnsPerHost: 10,               // 每个主机的最大空闲连接数
+			IdleConnTimeout:     90 * time.Second, // 空闲连接超时
+			DisableCompression:  false,            // 启用压缩
+			ForceAttemptHTTP2:   true,             // 优先使用 HTTP/2
+		},
+	}
+}
+
 // NewTranslator 创建翻译器实例，参数: API 密钥，返回: DeepLXTranslator 指针或错误
 func NewTranslator(apiKey string) (*DeepLXTranslator, error) {
 	if apiKey == "" || !strings.HasPrefix(apiKey, "sk-") {
@@ -62,13 +84,43 @@ func NewTranslator(apiKey string) (*DeepLXTranslator, error) {
 	}
 
 	return &DeepLXTranslator{
-		apiKey:  apiKey,
-		baseURL: "https://deeplx.jayogo.com/translate",
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second, // 设置超时，避免长时间等待
-		},
-		requestTimeout:  10 * time.Second,
-		maxRetryAttempt: 2,
+		apiKey:          apiKey,
+		baseURL:         defaultBaseURL,
+		httpClient:      defaultHTTPClient(defaultClientTimeout),
+		requestTimeout:  defaultRequestTimeout,
+		maxRetryAttempt: defaultMaxRetryAttempt,
+	}, nil
+}
+
+// NewTranslatorWithConfig 使用配置创建翻译器，参数: 配置对象，返回: DeepLXTranslator 指针或错误
+func NewTranslatorWithConfig(config *TranslationServiceConfig) (*DeepLXTranslator, error) {
+	if config == nil {
+		return nil, fmt.Errorf("配置不能为空")
+	}
+	if config.APIKey == "" || !strings.HasPrefix(config.APIKey, "sk-") {
+		return nil, fmt.Errorf("API 密钥必须以 sk- 开头")
+	}
+
+	// 应用超时配置
+	clientTimeout := defaultClientTimeout
+	requestTimeout := defaultRequestTimeout
+	if config.Timeout > 0 {
+		requestTimeout = time.Duration(config.Timeout) * time.Second
+		clientTimeout = requestTimeout * 3 // HTTP 客户端超时设为请求超时的 3 倍
+	}
+
+	// 应用 BaseURL 配置
+	baseURL := defaultBaseURL
+	if config.BaseURL != "" {
+		baseURL = strings.TrimSuffix(config.BaseURL, "/")
+	}
+
+	return &DeepLXTranslator{
+		apiKey:          config.APIKey,
+		baseURL:         baseURL,
+		httpClient:      defaultHTTPClient(clientTimeout),
+		requestTimeout:  requestTimeout,
+		maxRetryAttempt: defaultMaxRetryAttempt,
 	}, nil
 }
 
@@ -80,10 +132,10 @@ func NewTranslatorWithClient(apiKey string, client *http.Client) (*DeepLXTransla
 
 	return &DeepLXTranslator{
 		apiKey:          apiKey,
-		baseURL:         "https://deeplx.jayogo.com/translate",
+		baseURL:         defaultBaseURL,
 		httpClient:      client,
-		requestTimeout:  10 * time.Second,
-		maxRetryAttempt: 2,
+		requestTimeout:  defaultRequestTimeout,
+		maxRetryAttempt: defaultMaxRetryAttempt,
 	}, nil
 }
 
@@ -195,8 +247,11 @@ func (t *DeepLXTranslator) doRequest(ctx context.Context, req TranslationRequest
 			}
 		}
 
-		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		// 使用闭包确保 Body 正确关闭
+		body, readErr := func() ([]byte, error) {
+			defer resp.Body.Close()
+			return io.ReadAll(resp.Body)
+		}()
 		if cancel != nil {
 			cancel()
 		}
@@ -267,7 +322,8 @@ func (t *DeepLXTranslator) shouldRetry(err error) bool {
 	if err == nil {
 		return false
 	}
-	if ne, ok := err.(net.Error); ok && (ne.Timeout() || ne.Temporary()) {
+	// 注意: net.Error.Temporary() 从 Go 1.18 起已废弃，仅检查超时错误
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		return true
 	}
 	return false

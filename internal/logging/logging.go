@@ -43,7 +43,7 @@ func New(opts Options) *zerolog.Logger {
 	if opts.Service != "" {
 		contextBuilder = contextBuilder.Str("service", opts.Service)
 	}
-	contextBuilder = contextBuilder.Time("started_at", time.Now())
+	// 注意：移除了 started_at 字段，服务启动时间应在启动时单独记录一次
 
 	logger := contextBuilder.Logger().Level(level)
 	return &logger

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,8 +22,21 @@ type Config struct {
 	// 是否启用调试模式
 	Debug bool `yaml:"debug"`
 
+	// 服务器配置
+	Server ServerConfig `yaml:"server"`
+
 	// 翻译服务配置
 	Translation TranslationConfig `yaml:"translation"`
+
+	// 缓存配置
+	Cache CacheConfig `yaml:"cache"`
+}
+
+// ServerConfig 服务器配置 (超时与性能相关喵～)
+type ServerConfig struct {
+	RequestTimeout  int `yaml:"request_timeout"`  // 翻译请求超时 (秒)，默认 8
+	MiddlewareTimeout int `yaml:"middleware_timeout"` // 中间件超时 (秒)，默认 12
+	ShutdownTimeout int `yaml:"shutdown_timeout"` // 优雅停机超时 (秒)，默认 15
 }
 
 // TranslationConfig 翻译服务配置 (灵活选择 API 地址与类型喵)
@@ -30,6 +44,95 @@ type TranslationConfig struct {
 	ServiceType string `yaml:"service_type"`
 	APIKey      string `yaml:"api_key"`
 	BaseURL     string `yaml:"base_url"`
+	Model       string `yaml:"model"`   // 默认使用的模型 (如: gpt-3.5-turbo, gemini-1.5-pro-latest 等)
+	Timeout     int    `yaml:"timeout"` // 翻译请求超时 (秒)，默认 10
+}
+
+// CacheConfig Redis 缓存配置 (提升性能，减少 API 调用喵～)
+type CacheConfig struct {
+	// 基础配置
+	Enabled  bool   `yaml:"enabled"`  // 是否启用缓存
+	Addr     string `yaml:"addr"`     // Redis 地址，如 "localhost:6379"
+	Password string `yaml:"password"` // Redis 密码
+	DB       int    `yaml:"db"`       // 数据库编号
+
+	// 缓存策略
+	TTL                 string `yaml:"ttl"`                    // 缓存过期时间，如 "24h"，空或 "0" 表示永不过期
+	ShareAcrossServices bool   `yaml:"share_across_services"` // 不同服务共享缓存
+
+	// 连接池配置
+	PoolSize     int `yaml:"pool_size"`     // 连接池大小，默认 10
+	DialTimeout  int `yaml:"dial_timeout"`  // 连接超时 (秒)，默认 5
+	ReadTimeout  int `yaml:"read_timeout"`  // 读取超时 (秒)，默认 3
+	WriteTimeout int `yaml:"write_timeout"` // 写入超时 (秒)，默认 3
+}
+
+// GetTTL 获取 TTL 时间，返回 0 表示永不过期
+func (c *CacheConfig) GetTTL() time.Duration {
+	if c.TTL == "" || c.TTL == "0" {
+		return 0 // 永不过期
+	}
+	d, err := time.ParseDuration(c.TTL)
+	if err != nil {
+		return 0 // 解析失败，默认永不过期
+	}
+	return d
+}
+
+// GetPoolSize 获取连接池大小
+func (c *CacheConfig) GetPoolSize() int {
+	if c.PoolSize <= 0 {
+		return 10
+	}
+	return c.PoolSize
+}
+
+// GetDialTimeout 获取连接超时时间
+func (c *CacheConfig) GetDialTimeout() time.Duration {
+	if c.DialTimeout <= 0 {
+		return 5 * time.Second
+	}
+	return time.Duration(c.DialTimeout) * time.Second
+}
+
+// GetReadTimeout 获取读取超时时间
+func (c *CacheConfig) GetReadTimeout() time.Duration {
+	if c.ReadTimeout <= 0 {
+		return 3 * time.Second
+	}
+	return time.Duration(c.ReadTimeout) * time.Second
+}
+
+// GetWriteTimeout 获取写入超时时间
+func (c *CacheConfig) GetWriteTimeout() time.Duration {
+	if c.WriteTimeout <= 0 {
+		return 3 * time.Second
+	}
+	return time.Duration(c.WriteTimeout) * time.Second
+}
+
+// GetRequestTimeout 获取翻译请求超时时间，返回秒数
+func (c *ServerConfig) GetRequestTimeout() int {
+	if c.RequestTimeout <= 0 {
+		return 8 // 默认 8 秒
+	}
+	return c.RequestTimeout
+}
+
+// GetMiddlewareTimeout 获取中间件超时时间，返回秒数
+func (c *ServerConfig) GetMiddlewareTimeout() int {
+	if c.MiddlewareTimeout <= 0 {
+		return 12 // 默认 12 秒
+	}
+	return c.MiddlewareTimeout
+}
+
+// GetShutdownTimeout 获取优雅停机超时时间，返回秒数
+func (c *ServerConfig) GetShutdownTimeout() int {
+	if c.ShutdownTimeout <= 0 {
+		return 15 // 默认 15 秒
+	}
+	return c.ShutdownTimeout
 }
 
 // Load 从配置文件与环境变量加载配置，参数: 无，返回: 配置指针与可能的错误
@@ -101,6 +204,17 @@ func defaultConfig() *Config {
 		Translation: TranslationConfig{
 			ServiceType: "deeplx",
 		},
+		Cache: CacheConfig{
+			Enabled:             false,
+			Addr:                "localhost:6379",
+			DB:                  0,
+			TTL:                 "", // 空表示永不过期
+			ShareAcrossServices: true,
+			PoolSize:            10,
+			DialTimeout:         5,
+			ReadTimeout:         3,
+			WriteTimeout:        3,
+		},
 	}
 }
 
@@ -155,6 +269,40 @@ func applyEnvOverrides(cfg *Config) {
 		os.Getenv("DEEPLX_BASE_URL"),
 	)); v != "" {
 		cfg.Translation.BaseURL = v
+	}
+
+	if v := strings.TrimSpace(firstNonEmpty(
+		os.Getenv("TRANSLATION_MODEL"),
+		os.Getenv("DEEPLX_MODEL"),
+	)); v != "" {
+		cfg.Translation.Model = v
+	}
+
+	// 缓存配置环境变量覆盖
+	if v := strings.TrimSpace(os.Getenv("CACHE_ENABLED")); v != "" {
+		cfg.Cache.Enabled = parseBool(v)
+	}
+
+	if v := strings.TrimSpace(os.Getenv("CACHE_ADDR")); v != "" {
+		cfg.Cache.Addr = v
+	}
+
+	if v := strings.TrimSpace(os.Getenv("CACHE_PASSWORD")); v != "" {
+		cfg.Cache.Password = v
+	}
+
+	if v := strings.TrimSpace(os.Getenv("CACHE_DB")); v != "" {
+		if db, err := strconv.Atoi(v); err == nil {
+			cfg.Cache.DB = db
+		}
+	}
+
+	if v := strings.TrimSpace(os.Getenv("CACHE_TTL")); v != "" {
+		cfg.Cache.TTL = v
+	}
+
+	if v := strings.TrimSpace(os.Getenv("CACHE_SHARE_ACROSS_SERVICES")); v != "" {
+		cfg.Cache.ShareAcrossServices = parseBool(v)
 	}
 }
 

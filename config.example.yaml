@@ -1,6 +1,33 @@
 port: "60024"
 debug: false
+
+# 服务器配置 (超时相关)
+server:
+  request_timeout: 8      # 翻译请求超时 (秒)，默认 8
+  middleware_timeout: 12  # 中间件超时 (秒)，默认 12
+  shutdown_timeout: 15    # 优雅停机超时 (秒)，默认 15
+
+# 翻译服务配置
 translation:
   service_type: "deeplx"
   api_key: "sk-your-key"
   base_url: "https://deeplx.jayogo.com/translate" # 可选：自定义 DeepLX / 代理地址
+  model: ""    # 可选：指定默认翻译模型 (如: gpt-3.5-turbo, gpt-4o-mini, gemini-1.5-pro-latest 等)
+  timeout: 10  # 可选：翻译器请求超时 (秒)，默认 10
+
+# Redis 缓存配置 (可选，减少 API 调用，提升性能)
+cache:
+  enabled: false              # 是否启用缓存，默认 false
+  addr: "localhost:6379"      # Redis 地址
+  password: ""                # Redis 密码（可选）
+  db: 0                       # 数据库编号
+
+  # 缓存策略
+  ttl: ""                     # 缓存过期时间：空或 "0" = 永不过期，如 "24h" = 24小时后过期
+  share_across_services: true # 不同翻译服务共享缓存（true=共享，false=按服务隔离）
+
+  # 连接池配置
+  pool_size: 10               # 连接池大小，默认 10
+  dial_timeout: 5             # 连接超时 (秒)，默认 5
+  read_timeout: 3             # 读取超时 (秒)，默认 3
+  write_timeout: 3            # 写入超时 (秒)，默认 3
